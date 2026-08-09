@@ -119,8 +119,7 @@ function render(){
  if(view.screen==="home") return home(app);
  if(view.screen==="shop") return shop(app);
  if(view.screen==="month") return month(app);
-if(view.screen==="monthdates") return monthdates(app);
-if(view.screen==="day") return day(app);
+ if(view.screen==="day") return day(app);
  if(view.screen==="reports") return reports(app);
  if(view.screen==="items") return itemManager(app);
  if(view.screen==="transfers") return transfers(app);
@@ -150,8 +149,8 @@ function day(a){
  const rows=items.filter(x=>x.active).map(it=>{
    const r=rec[it.id]||{};
    const opening = r.opening!==undefined ? r.opening : previousClosing(it.id,view.shop,view.date);
-   const received=+r.received||0,sold=+r.sold||0,purchase=+r.purchase||0,sale=+r.sale||0;
-   const closing=opening+received-sold;
+   const received=+r.received||0,sold=+r.sold||0,purchase=+r.purchase||0,sale=+r.sale||0,transferOut=+r.transferOut||0;
+   const closing=opening+received-sold-transferOut;
    const profit=sale-(sold*purchase);
    return {it,r,opening,received,sold,purchase,sale,closing,profit};
  });
@@ -173,11 +172,52 @@ function setCell(id,key,val){
  const rec=getRecord(view.shop,view.date); if(!rec[id])rec[id]={}; rec[id][key]=Number(val)||0; state.records[recKey(view.shop,view.date)]=rec; save(); render();
 }
 function previousClosing(id,shop,date){
- const [m,d]=date.split(" "); let mi=months().indexOf(m),day=+d-1;
- if(day<1){mi--;if(mi<0)return 0;day=daysInMonth(months()[mi])}
- const prev=months()[mi]+" "+String(day).padStart(2,"0"); const r=state.records[recKey(shop,prev)]?.[id];
- if(!r)return 0;
- const opening=+r.opening||0,received=+r.received||0,sold=+r.sold||0;return opening+received-sold;
+  const [m,d]=date.split(" ");
+  let mi=months().indexOf(m), day=+d-1;
+  let base=0;
+
+  if(day<1){
+    mi--;
+    if(mi<0) return 0;
+    day=daysInMonth(months()[mi]);
+  }
+
+  const prev=months()[mi]+" "+String(day).padStart(2,"0");
+  const r=state.records[recKey(shop,prev)]?.[id];
+
+  if(r){
+    const opening=+r.opening||0;
+    const received=+r.received||0;
+    const sold=+r.sold||0;
+    base=opening+received-sold;
+  }
+
+  const it=items.find(x=>x.id===id);
+  if(!it) return base;
+
+  // Add/subtract every transfer that occurred before the selected day.
+  const targetIndex = months().indexOf(m);
+  const targetDay = +d;
+  const currentYear = new Date().getFullYear();
+
+  state.transfers.forEach(t=>{
+    const td = new Date(t.date + "T23:59:59");
+    if(isNaN(td)) return;
+
+    const beforeSelectedDay =
+      td.getFullYear() < currentYear ||
+      (td.getFullYear() === currentYear &&
+       (td.getMonth() < targetIndex ||
+        (td.getMonth() === targetIndex && td.getDate() < targetDay)));
+
+    if(!beforeSelectedDay) return;
+    if(t.item !== it.name || String(t.size) !== String(it.size)) return;
+
+    if(t.to === shop) base += (+t.qty||0);
+    if(t.from === shop) base -= (+t.qty||0);
+  });
+
+  return base;
 }
 function getPreviousDate(date){return date}
 function addItemModal(){
@@ -224,7 +264,34 @@ function transferModal(){
   if(from===to)return alert("Choose two different shops.");
   if(!Number.isFinite(qty)||qty<=0)return alert("Enter a valid quantity.");
   const it=items.find(x=>x.id===document.getElementById("trItem").value);
-  state.transfers.push({date:document.getElementById("trDate").value,item:it.name,size:it.size,from,to,qty});save();closeModal();render();
+  const transferDate=document.getElementById("trDate").value;
+  const dt=new Date(transferDate+"T12:00:00");
+  const monthName=months()[dt.getMonth()];
+  const dayName=String(dt.getDate()).padStart(2,"0");
+  const recordDate=monthName+" "+dayName;
+
+  state.transfers.push({
+    date:transferDate,
+    item:it.name,
+    size:it.size,
+    from,
+    to,
+    qty
+  });
+
+  // Record the transfer as stock movement, not as a sale.
+  const sourceRec=getRecord(from,recordDate);
+  if(!sourceRec[it.id]) sourceRec[it.id]={};
+  sourceRec[it.id].transferOut=(+sourceRec[it.id].transferOut||0)+qty;
+
+  const destRec=getRecord(to,recordDate);
+  if(!destRec[it.id]) destRec[it.id]={};
+  destRec[it.id].received=(+destRec[it.id].received||0)+qty;
+
+  state.records[recKey(from,recordDate)]=sourceRec;
+  state.records[recKey(to,recordDate)]=destRec;
+
+  save();closeModal();render();
  };openModal();
 }
 function reports(a){
