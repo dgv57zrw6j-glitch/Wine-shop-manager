@@ -104,7 +104,7 @@ if(!state){
 
 let view={screen:"home",shop:null,month:null,date:null};
 
-function save(){state.items=items; try { localStorage.setItem(key,JSON.stringify(state)); } catch(e) {} }
+function save(queue=true){state.items=items; try { localStorage.setItem(key,JSON.stringify(state)); } catch(e) {} if(queue) queueCloudSync(); }
 function money(n){return "₹"+Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:2})}
 function recKey(shop,date){return shop+"|"+date}
 function getRecord(shop,date){
@@ -118,11 +118,124 @@ function months(){
 function daysInMonth(m){return new Date(new Date().getFullYear(),months().indexOf(m)+1,0).getDate()}
 function renderHeader(){
  let title=view.screen==="home"?"Wine Shop Stock Manager":view.shop||"";
- document.getElementById("headerContent").innerHTML=(view.screen!=="home"?`<button class="back" onclick="goBack()">‹ Back</button>`:"")+`<h1>${title}</h1><div class="sub">Inventory • Sales • Transfers • Profit</div>`;
+ document.getElementById("headerContent").innerHTML=(view.screen!=="home"?`<button class="back" onclick="goBack()">‹ Back</button>`:"")+`<h1>${title}</h1><div class="sub">Inventory • Sales • Transfers • Profit ${cloudUser?`• ${cloudProfile?.role||"staff"}`:""}</div>${cloudUser?`<div class="actions" style="margin-top:8px"><span id="cloudStatus" class="badge good">☁️ Cloud connected</span><button class="secondary" onclick="cloudLogout()">Log out</button></div>`:""}`;
 }
 
 let cloudUser=null;
 let cloudProfile=null;
+let cloudReady=false;
+let cloudShops=[];
+let cloudShopByName={};
+let cloudItemMap={};
+let cloudAccess=new Set();
+let cloudSyncTimer=null;
+let cloudSyncBusy=false;
+
+function isoDateFromKey(k){
+ const [m,d]=k.split(" "); const mi=months().indexOf(m);
+ if(mi<0) return null;
+ return `${new Date().getFullYear()}-${String(mi+1).padStart(2,"0")}-${String(+d).padStart(2,"0")}`;
+}
+function keyFromIsoDate(iso){
+ const dt=new Date(iso+"T12:00:00");
+ return months()[dt.getMonth()]+" "+String(dt.getDate()).padStart(2,"0");
+}
+function queueCloudSync(){
+ if(!cloudReady) return;
+ clearTimeout(cloudSyncTimer);
+ cloudSyncTimer=setTimeout(()=>syncLocalToCloud(),700);
+}
+async function cloudLoadMeta(){
+ const {data:shopRows,error:shopErr}=await supabaseClient.from("shops").select("id,name").order("name");
+ if(shopErr) throw shopErr;
+ cloudShops=shopRows||[]; cloudShopByName={}; cloudShops.forEach(s=>cloudShopByName[s.name]=s.id);
+ const {data:accessRows,error:accessErr}=await supabaseClient.from("shop_access").select("shop_id").eq("user_id",cloudUser.id);
+ if(accessErr) throw accessErr;
+ cloudAccess=new Set((accessRows||[]).map(x=>x.shop_id));
+}
+async function cloudLoadItems(seedIfEmpty=true){
+ let {data:rows,error}=await supabaseClient.from("items").select("id,name,size_ml,active,default_purchase_cost");
+ if(error) throw error;
+ if((rows||[]).length===0 && seedIfEmpty && cloudProfile?.role==='admin'){
+   const payload=items.map(it=>({name:it.name,size_ml:+it.size,active:it.active!==false,default_purchase_cost:+(it.defaultPurchase||0)}));
+   if(payload.length){ const r=await supabaseClient.from("items").upsert(payload,{onConflict:"name,size_ml"}); if(r.error) throw r.error; }
+   const r=await supabaseClient.from("items").select("id,name,size_ml,active,default_purchase_cost");
+   if(r.error) throw r.error; rows=r.data||[];
+ }
+ cloudItemMap={}; (rows||[]).forEach(ci=>{cloudItemMap[ci.name+"|"+ci.size_ml]=ci.id;});
+ // Merge cloud catalogue into local catalogue. Local IDs remain stable for daily records.
+ (rows||[]).forEach(ci=>{
+   const existing=items.find(x=>x.name===ci.name && String(x.size)===String(ci.size_ml));
+   if(existing){ existing.active=ci.active; existing.cloudId=ci.id; existing.defaultPurchase=+ci.default_purchase_cost||0; }
+   else items.push({id:(crypto.randomUUID?crypto.randomUUID():(Date.now()+Math.random()).toString(36)),name:ci.name,size:String(ci.size_ml),active:ci.active,defaultPurchase:+ci.default_purchase_cost||0,cloudId:ci.id});
+ });
+ save(false);
+}
+async function cloudUploadItems(){
+ if(cloudProfile?.role!=='admin') return;
+ const payload=items.map(it=>({name:it.name,size_ml:+it.size,active:it.active!==false,default_purchase_cost:+(it.defaultPurchase||0)}));
+ if(!payload.length)return;
+ const r=await supabaseClient.from("items").upsert(payload,{onConflict:"name,size_ml"});
+ if(r.error)throw r.error;
+ await cloudLoadItems(false);
+}
+async function syncLocalToCloud(){
+ if(!cloudReady||cloudSyncBusy)return;
+ cloudSyncBusy=true;
+ try{
+   if(cloudProfile?.role==='admin') await cloudUploadItems();
+   const recordRows=[];
+   for(const [key,rec] of Object.entries(state.records||{})){
+     const [shopName]=key.split("|"); const shopId=cloudShopByName[shopName]; if(!shopId || !cloudAccess.has(shopId) && cloudProfile?.role!=='admin') continue;
+     const recordDate=isoDateFromKey(key.split("|")[1]); if(!recordDate) continue;
+     for(const [localId,r] of Object.entries(rec)){
+       const it=items.find(x=>x.id===localId); if(!it)continue;
+       const itemId=it.cloudId||cloudItemMap[it.name+"|"+it.size]; if(!itemId)continue;
+       recordRows.push({shop_id:shopId,record_date:recordDate,item_id:itemId,opening_stock:+r.opening||0,stock_received:+r.received||0,purchase_cost:+r.purchase||0,quantity_sold:+r.sold||0,actual_sale_amount:+r.sale||0,transfer_out:+r.transferOut||0});
+     }
+   }
+   if(recordRows.length){ const r=await supabaseClient.from("daily_records").upsert(recordRows,{onConflict:"shop_id,record_date,item_id"}); if(r.error)throw r.error; }
+   const transferRows=(state.transfers||[]).map(t=>{
+     const it=items.find(x=>x.name===t.item && String(x.size)===String(t.size));
+     return it?{client_id:t.clientId||(t.clientId=(crypto.randomUUID?crypto.randomUUID():Date.now()+Math.random())),transfer_date:t.date,item_id:it.cloudId||cloudItemMap[it.name+"|"+it.size],from_shop_id:cloudShopByName[t.from],to_shop_id:cloudShopByName[t.to],quantity:+t.qty||0}:null;
+   }).filter(t=>t&&t.item_id&&t.from_shop_id&&t.to_shop_id&&t.quantity>0);
+   if(transferRows.length){ const r=await supabaseClient.from("stock_transfers").upsert(transferRows,{onConflict:"client_id"}); if(r.error)throw r.error; }
+   localStorage.setItem("wineShopLastCloudSync",new Date().toISOString());
+   const s=document.getElementById("cloudStatus"); if(s)s.textContent="☁️ Synced";
+ }catch(e){ const s=document.getElementById("cloudStatus"); if(s)s.textContent="⚠️ Cloud sync pending"; console.error(e); }
+ finally{cloudSyncBusy=false;}
+}
+async function downloadCloudData(){
+ const allowedIds=cloudProfile?.role==='admin'?cloudShops.map(s=>s.id):Array.from(cloudAccess);
+ let rq=supabaseClient.from("daily_records").select("shop_id,record_date,item_id,opening_stock,stock_received,purchase_cost,quantity_sold,actual_sale_amount,transfer_out");
+ if(allowedIds.length && cloudProfile?.role!=='admin') rq=rq.in("shop_id",allowedIds);
+ const {data:rows,error}=await rq; if(error)throw error;
+ const byCloudId={}; items.forEach(it=>{if(it.cloudId)byCloudId[it.cloudId]=it.id;});
+ (rows||[]).forEach(r=>{
+   const shop=cloudShops.find(s=>s.id===r.shop_id)?.name; const localId=byCloudId[r.item_id]; if(!shop||!localId)return;
+   const k=recKey(shop,keyFromIsoDate(r.record_date));
+   state.records[k]=state.records[k]||{}; state.records[k][localId]={opening:r.opening_stock,received:r.stock_received,purchase:r.purchase_cost,sold:r.quantity_sold,sale:r.actual_sale_amount,transferOut:r.transfer_out};
+ });
+ let tq=supabaseClient.from("stock_transfers").select("client_id,transfer_date,item_id,from_shop_id,to_shop_id,quantity");
+ const {data:trs,error:te}=await tq; if(te)throw te;
+ state.transfers=[]; (trs||[]).forEach(t=>{const it=items.find(x=>x.cloudId===t.item_id);const from=cloudShops.find(s=>s.id===t.from_shop_id)?.name;const to=cloudShops.find(s=>s.id===t.to_shop_id)?.name;if(it&&from&&to)state.transfers.push({clientId:t.client_id,date:t.transfer_date,item:it.name,size:it.size,from,to,qty:t.quantity});});
+ save(false);
+}
+async function initializeCloud(){
+ try{
+  const {data}=await supabaseClient.auth.getSession();
+  if(!data.session){render();return;}
+  cloudUser=data.session.user; await loadCloudProfile();
+  if(!cloudProfile){render();return;}
+  await cloudLoadMeta();
+  await cloudLoadItems(true);
+  await downloadCloudData();
+  cloudReady=true; render();
+  // If the cloud was empty, push the local records; otherwise local is now hydrated from cloud.
+  await syncLocalToCloud();
+ }catch(e){console.error(e);cloudReady=false;render();}
+}
+
 
 async function loadCloudProfile(){
   if(!cloudUser){cloudProfile=null;return;}
@@ -139,7 +252,7 @@ async function cloudLogin(){
   if(error){msg.textContent=error.message;return;}
   cloudUser=data.user;
   await loadCloudProfile();
-  render();
+  await initializeCloud();
 }
 
 async function cloudSignup(){
@@ -153,7 +266,7 @@ async function cloudSignup(){
   if(data.session){
     cloudUser=data.user;
     await loadCloudProfile();
-    render();
+    await initializeCloud();
   }else{
     msg.textContent="Account created. Check your email to confirm it, then log in.";
   }
@@ -161,7 +274,7 @@ async function cloudSignup(){
 
 async function cloudLogout(){
   await supabaseClient.auth.signOut();
-  cloudUser=null; cloudProfile=null; render();
+  cloudUser=null; cloudProfile=null; cloudReady=false; render();
 }
 
 function loginScreen(app){
@@ -187,11 +300,12 @@ function render(){
  if(view.screen==="home") return home(app);
  if(view.screen==="shop") return shop(app);
  if(view.screen==="month") return month(app);
-if(view.screen==="monthdates") return monthdates(app);
-if(view.screen==="day") return day(app);
+ if(view.screen==="monthdates") return monthdates(app);
+ if(view.screen==="day") return day(app);
  if(view.screen==="reports") return reports(app);
  if(view.screen==="items") return itemManager(app);
  if(view.screen==="transfers") return transfers(app);
+ if(view.screen==="team") return teamManager(app);
 }
 function home(a){
  a.innerHTML=`<div class="grid">${shops.map((s,i)=>`<div class="card shop" onclick="openShop('${s.replace(/'/g,"\\'")}')"><div class="muted">SHOP ${i+1}</div><div class="big">${s}</div><p class="muted">Months → Dates → Daily records</p></div>`).join("")}</div>
@@ -200,6 +314,7 @@ function home(a){
  <div class="card shop" onclick="view.screen='items';render()"><h3>➕ Items & Stock</h3><p class="muted">Add or manage products and sizes</p></div>
  <div class="card shop" onclick="view.screen='transfers';render()"><h3>🔄 Stock Transfers</h3><p class="muted">Move stock between the 4 shops</p></div>
 </div>
+${cloudProfile?.role==='admin'?`<div class="card shop" style="margin-top:14px" onclick="view.screen='team';render()"><h3>👥 Team & Shop Access</h3><p class="muted">Manage staff roles and assign shops</p></div>`:""}
 <div class="note">Your initial item list from the uploaded register photos is loaded as a starting point. You can add new items anytime.</div>`;
 }
 function openShop(s){view={screen:"month",shop:s};render()}
@@ -317,6 +432,32 @@ function addItemModal(){
 }
 function openModal(){document.getElementById("modal").classList.add("show")}
 function closeModal(){document.getElementById("modal").classList.remove("show")}
+async function teamManager(a){
+ const {data:profiles,error}=await supabaseClient.from("profiles").select("id,full_name,role,created_at").order("created_at");
+ if(error){a.innerHTML=`<div class="note">Unable to load team: ${error.message}</div>`;return;}
+ const {data:access}=await supabaseClient.from("shop_access").select("user_id,shop_id");
+ const amap={};(access||[]).forEach(x=>{(amap[x.user_id]??=[]).push(x.shop_id);});
+ const cards=(profiles||[]).map(p=>{
+   const controls=shops.map(s=>{
+     const sid=cloudShopByName[s];
+     const checked=p.role==='admin'||(amap[p.id]||[]).includes(sid);
+     return `<label style="background:#f5f6f8;padding:7px 9px;border-radius:9px"><input type="checkbox" ${checked?'checked':''} ${p.role==='admin'?'disabled':''} onchange="setShopAccess('${p.id}','${sid}',this.checked)"> ${s}</label>`;
+   }).join('');
+   const roleButton=p.id!==cloudUser.id?`<button onclick="toggleRole('${p.id}','${p.role}')">Make ${p.role==='admin'?'Staff':'Admin'}</button>`:`<span class="badge good">You</span>`;
+   return `<div class="card" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div><b>${p.full_name||p.id}</b><div class="muted">${p.role}</div></div>${roleButton}</div><div class="toolbar" style="margin-top:10px">${controls}</div></div>`;
+ }).join('');
+ a.innerHTML=`<div class="toolbar"><span class="muted">Staff create their account from the login screen. You assign their shop access here.</span></div>${cards}`;
+}
+async function toggleRole(userId,current){
+ if(userId===cloudUser.id)return;
+ const role=current==='admin'?'staff':'admin';
+ const {error}=await supabaseClient.from("profiles").update({role}).eq("id",userId);
+ if(error)alert(error.message);else teamManager(document.getElementById("app"));
+}
+async function setShopAccess(userId,shopId,checked){
+ if(checked){const {error}=await supabaseClient.from("shop_access").upsert({user_id:userId,shop_id:shopId});if(error)alert(error.message);}
+ else {const {error}=await supabaseClient.from("shop_access").delete().eq("user_id",userId).eq("shop_id",shopId);if(error)alert(error.message);}
+}
 function itemManager(a){
  a.innerHTML=`<div class="toolbar"><button onclick="addItemModal()">➕ Add New Item</button><span class="muted">${items.length} item/size entries</span></div>
  <div class="tablewrap"><table style="min-width:650px"><thead><tr><th>Item</th><th>Size</th><th>Status</th><th>Action</th></tr></thead><tbody>
@@ -350,6 +491,7 @@ function transferModal(){
   const recordDate=monthName+" "+dayName;
 
   state.transfers.push({
+    clientId:(crypto.randomUUID?crypto.randomUUID():Date.now()+Math.random()),
     date:transferDate,
     item:it.name,
     size:it.size,
