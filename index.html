@@ -119,7 +119,6 @@ function render(){
  if(view.screen==="home") return home(app);
  if(view.screen==="shop") return shop(app);
  if(view.screen==="month") return month(app);
-  if(view.screen==="monthdates") return monthdates(app);
  if(view.screen==="day") return day(app);
  if(view.screen==="reports") return reports(app);
  if(view.screen==="items") return itemManager(app);
@@ -222,6 +221,7 @@ function transferModal(){
  document.getElementById("modalSave").onclick=()=>{
   const from=document.getElementById("trFrom").value,to=document.getElementById("trTo").value,qty=+document.getElementById("trQty").value;
   if(from===to)return alert("Choose two different shops.");
+  if(!Number.isFinite(qty)||qty<=0)return alert("Enter a valid quantity.");
   const it=items.find(x=>x.id===document.getElementById("trItem").value);
   state.transfers.push({date:document.getElementById("trDate").value,item:it.name,size:it.size,from,to,qty});save();closeModal();render();
  };openModal();
