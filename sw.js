@@ -1,16 +1,19 @@
-const CACHE = "wine-shop-v3";
-const ASSETS = ["./index.html", "./manifest.webmanifest"];
+const CACHE = "wine-shop-v4";
+const ASSETS = [
+  "./index.html",
+  "./manifest.webmanifest"
+];
 
-self.addEventListener("install", e => {
-  e.waitUntil(
+self.addEventListener("install", event => {
+  event.waitUntil(
     caches.open(CACHE)
       .then(cache => cache.addAll(ASSETS))
       .then(() => self.skipWaiting())
   );
 });
 
-self.addEventListener("activate", e => {
-  e.waitUntil(
+self.addEventListener("activate", event => {
+  event.waitUntil(
     caches.keys().then(keys =>
       Promise.all(
         keys
@@ -21,12 +24,12 @@ self.addEventListener("activate", e => {
   );
 });
 
-self.addEventListener("fetch", e => {
-  if (e.request.method !== "GET") return;
+self.addEventListener("fetch", event => {
+  if (event.request.method !== "GET") return;
 
-  e.respondWith(
-    caches.match(e.request).then(cachedResponse => {
-      return cachedResponse || fetch(e.request);
+  event.respondWith(
+    caches.match(event.request).then(cached => {
+      return cached || fetch(event.request);
     })
   );
 });
