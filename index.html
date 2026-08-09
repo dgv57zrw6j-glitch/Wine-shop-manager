@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Wine Shop Stock Manager</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--text:#17202a;--muted:#68727d;--line:#e5e7eb;--accent:#173f5f;--good:#147d4f;--warn:#a66b00;--bad:#b42318}
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text)}
+header{background:var(--accent);color:#fff;padding:22px 18px 18px;position:sticky;top:0;z-index:5}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:20px;margin:0 0 14px}h3{margin:0 0 10px}.sub{opacity:.82;font-size:13px}
+main{max-width:1100px;margin:auto;padding:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 2px 8px #00000008}
+.shop{cursor:pointer;transition:.15s}.shop:hover{transform:translateY(-2px);box-shadow:0 8px 22px #00000012}
+.big{font-size:26px;font-weight:750}.muted{color:var(--muted)}button,select,input{font:inherit}
+button{border:0;border-radius:10px;padding:10px 13px;cursor:pointer;background:var(--accent);color:#fff}
+button.secondary{background:#eef2f5;color:var(--text)}button.danger{background:#b42318}.actions{display:flex;gap:8px;flex-wrap:wrap}
+.back{background:transparent;color:#fff;padding:4px 0;margin-bottom:8px}
+.breadcrumb{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:14px;color:var(--muted);font-size:14px}
+.months,.dates{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.tile{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer}
+.tile strong{display:block}.tile small{color:var(--muted)}
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fff}
+table{width:100%;border-collapse:collapse;min-width:920px}th,td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:right;font-size:13px;white-space:nowrap}th{background:#f1f4f6;position:sticky;top:0}th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:inherit;z-index:1}
+td input{width:85px;padding:7px;border:1px solid #d6dae0;border-radius:7px}td .itemname{font-weight:650}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px}.kpi b{font-size:20px;display:block;margin-top:4px}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700}.good{background:#e6f5ee;color:var(--good)}.warn{background:#fff2d8;color:var(--warn)}.bad{background:#fde9e7;color:var(--bad)}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}.toolbar select,.toolbar input{padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;padding:18px;z-index:20}.modal.show{display:flex}.modalbox{background:#fff;border-radius:16px;max-width:500px;width:100%;padding:18px}.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.formgrid label{font-size:12px;color:var(--muted)}.formgrid input,.formgrid select{width:100%;padding:9px;border:1px solid #d6dae0;border-radius:8px;margin-top:4px}.full{grid-column:1/-1}
+.note{padding:11px 13px;background:#eef5fb;border-radius:10px;font-size:13px;margin:12px 0}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+</style>
+
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#173f5f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Wine Shop Manager">
+
+</head>
+<body>
+<header>
+  <div id="headerContent"></div>
+</header>
+<main id="app"></main>
+
+<div class="modal" id="modal">
+ <div class="modalbox">
+  <h3 id="modalTitle"></h3>
+  <div id="modalBody"></div>
+  <div class="actions" style="margin-top:14px;justify-content:flex-end">
+   <button class="secondary" onclick="closeModal()">Cancel</button>
+   <button id="modalSave">Save</button>
+  </div>
+ </div>
+</div>
+
+<script>
+const shops=["Nargu Wine Shop","Star Wine Shop","Bengia Wine Shop","B3 Wine Shop"];
+const itemsRaw=[
+["Water","1000"],["Water","500"],["Soda","750"],["Corona Extra Beer","330"],["Old Monk Tropical Passion","275"],
+["Royal Style (W)","750,375,180"],["Jameson Iris (W)","750,200"],["TNT Red Grapes (Black Rock)","750,1200"],["TNT Red Grapes (Sila)","750"],
+["Ballantines Scotch (W)","750"],["Absolut Vodka","750"],["Golden Oak (W)","750,375,180"],["Breezer (Blueberry)","275"],["Breezer (Mango Peach)","275"],
+["Camino Real Blanco Tequila","750"],["Blue Time","180"],["Magic Fountain","180"],["Red Lebel","750,375"],["Four Season (White)","750,375,180"],["Glenfeddich (15y)","750"],
+["Bro Code (W)","330"],["Sanza Wine","750"],["Royal Blue Gold","750,375,180"],["Pristine Blue","750,375,180"],["Old Fountain XXX Rum","750,375,180"],
+["Bacardi White (R)","750,375,180"],["Norphel Apple Wine","750,375"],["Count Cristo","750"],["Naara-Aaba (Kiwi Classic)","750"],["Naara-Aaba (Kiwi Sweet)","750"],
+["Naara-Aaba (Ginger)","750"],["Naara-Aaba (Plum)","750"],["Heman 9000 Cane","500"],["Kingfisher Ultra Cane","500"],["Kingfisher Ultra Cane","330"],
+["Kingfisher Ultra MAX Cane","500"],["Thunderbolt Beer Cane","500"],["Black & White","750,375,180"],["Kiwi (Ziro)","375"],["Indri Single Malt (W)","750"],
+["Madira","750"],["Marua Wine","375"],["Fire Ball","60"],["Amred Red (W)","750"],["Old Monk Coffee","750,180"],["American Pride (W)","750,180"],
+["Macario Vodka","750,375,180"],["William Lawson's (W)","750,180"],["Bacardi Mango Chilli","750,375,180"],["Mokambo Reserve Premium (W)","750,375,180"],
+["Sidius (W)","750"],["Blenders Pride (P)","750,375,180"],["Port Gold (W)","750"],["Celia (W)","750"],["Budwiser Magnum","500"],["Glenfeddich (12y)","750"],
+["Glenfeddich (18y)","750"],["Old Monk Rum","750,375,180"],["B/10","750,375,180"],["Jack Daniel","750"],["OC Blue (W)","750,375,180"],["Old Monk Cane","500"],
+["Red Star","500"],["100 Piper (12y)","750"],["Makhoni Cane","350"],["Kingfisher Cane","500"],["Kingfisher Bottle","650"],["Jacob Creek","750"],["Hardus Wine","750"],
+["Jamun Wine","750,375"],["Gold Flow Cane Beer","500,750,180"],["Highlight (W)","750,375,180"],["Shilka Blue Deluxe (W)","750,375,180"],["Carlsberg Cane","500"],
+["Teachers 50","750,375,180"],["Bacardi (R)","750,375,180"],["Antiquity (W)","750,375,180"],["Sola (W)","750"],["Carlo Rossi","750"],["Iconiq White (W)","750,375,180"],
+["Legacy (W)","750,375,180"],["IB (W)","750,375,180"],["Four Season (Red)","750,375,180"],["MCD (B)","750,375,180"],["MCD (R)","750,375,180"],
+["RS B/Select","750,375,180"],["Jim Beam","750,180"],["Dewar White Label","750,375,180"],["9 Star","180"],["9 Star Blue (W)","180"],
+["Tuborg Cane 80/-","500"],["Tuborg Bottle","650"],["Breezer","275"],["Breezer Blackberry","275"],["Breezer Watermelon","275"],["Breezer Cranberry","275"],
+["Black Label","750"],["Signature (P)","750,375,180"],["Bacardi Lemon","750,375,180"],["8 PM (W)","750,375,180"],["Naara-Aaba Kiwi (W)","750"],
+["SC Port (W)","750"],["MCD No.1 (L)","750,375,180"],["Vino Port (W)","750,375"],["Lendamen","750"],
+["Black Dog (W)","750,375,180"],["Oakenglow","750,375,180"],["Zinzi Wine","750,180"],["M.M. Vodka","750,375,180"],["Zumzin Wine","750,375,180"],
+["VAT 69","180,375,750"],["Norphel Kiwi Wine","750,375"],["MM Remix","750,375,180"],["Teachers Highland","750,375,180"],["Heineken","330,500"],
+["Budwiser Cane","500"],["B/7 (W)","750,375,180"],["100 Piper (W)","750,375,180"],["Signature (W)","750,375,180"],["Blenders Pride (W)","750,375,180"],
+["Oaksmith (W)","750,375,180"],["Royal Casino (W)","180"],["D.I.A Wine","750"],["R S (W)","750,375,180"]
+];
+
+let items=[];
+itemsRaw.forEach(([name,sizes])=>sizes.split(",").forEach(size=>items.push({id:(crypto.randomUUID ? crypto.randomUUID() : (Date.now()+Math.random()).toString(36)),name:name.trim(),size:size.trim(),active:true})));
+
+const key="wineShopPrototypeV1";
+let state=null; try { state=JSON.parse(localStorage.getItem(key)||"null"); } catch(e) { state=null; }
+if(!state){
+ state={items, records:{}, transfers:[], expenses:[]};
+ save();
+}else{
+ items=state.items;
+}
+
+let view={screen:"home",shop:null,month:null,date:null};
+
+function save(){state.items=items; try { localStorage.setItem(key,JSON.stringify(state)); } catch(e) {} }
+function money(n){return "₹"+Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:2})}
+function recKey(shop,date){return shop+"|"+date}
+function getRecord(shop,date){
+ const k=recKey(shop,date);
+ if(!state.records[k]) state.records[k]={};
+ return state.records[k];
+}
+function months(){
+ return ["January","February","March","April","May","June","July","August","September","October","November","December"];
+}
+function daysInMonth(m){return new Date(new Date().getFullYear(),months().indexOf(m)+1,0).getDate()}
+function renderHeader(){
+ let title=view.screen==="home"?"Wine Shop Stock Manager":view.shop||"";
+ document.getElementById("headerContent").innerHTML=(view.screen!=="home"?`<button class="back" onclick="goBack()">‹ Back</button>`:"")+`<h1>${title}</h1><div class="sub">Inventory • Sales • Transfers • Profit</div>`;
+}
+function render(){
+ renderHeader(); const app=document.getElementById("app");
+ if(view.screen==="home") return home(app);
+ if(view.screen==="shop") return shop(app);
+ if(view.screen==="month") return month(app);
+ if(view.screen==="day") return day(app);
+ if(view.screen==="reports") return reports(app);
+ if(view.screen==="items") return itemManager(app);
+ if(view.screen==="transfers") return transfers(app);
+}
+function home(a){
+ a.innerHTML=`<div class="grid">${shops.map((s,i)=>`<div class="card shop" onclick="openShop('${s.replace(/'/g,"\\'")}')"><div class="muted">SHOP ${i+1}</div><div class="big">${s}</div><p class="muted">Months → Dates → Daily records</p></div>`).join("")}</div>
+<div class="grid" style="margin-top:14px">
+ <div class="card shop" onclick="view.screen='reports';render()"><h3>📊 Overall Reports</h3><p class="muted">Today, week, month and custom reports</p></div>
+ <div class="card shop" onclick="view.screen='items';render()"><h3>➕ Items & Stock</h3><p class="muted">Add or manage products and sizes</p></div>
+ <div class="card shop" onclick="view.screen='transfers';render()"><h3>🔄 Stock Transfers</h3><p class="muted">Move stock between the 4 shops</p></div>
+</div>
+<div class="note">Your initial item list from the uploaded register photos is loaded as a starting point. You can add new items anytime.</div>`;
+}
+function openShop(s){view={screen:"month",shop:s};render()}
+function shop(a){view.screen="month";month(a)}
+function month(a){
+ a.innerHTML=`<div class="breadcrumb">${view.shop} <span>›</span> Select Month</div><div class="months">${months().map(m=>`<div class="tile" onclick="view.month='${m}';view.screen='monthdates';render()"><strong>📅 ${m}</strong><small>Open daily records</small></div>`).join("")}</div>`;
+}
+function monthdates(a){
+ a.innerHTML=`<div class="breadcrumb">${view.shop} › ${view.month} <span>›</span> Select Date</div><div class="dates">${Array.from({length:daysInMonth(view.month)},(_,i)=>{let d=String(i+1).padStart(2,"0"),rec=state.records[recKey(view.shop,view.month+" "+d)];return `<div class="tile" onclick="view.date='${view.month} ${d}';view.screen='day';render()"><strong>${d}</strong><small>${rec?money(Object.values(rec).reduce((s,r)=>s+(+r.sale||0),0)):"No entry"}</small></div>`}).join("")}</div>`;
+}
+function goBack(){if(view.screen==="day"){view.screen="monthdates"}else if(view.screen==="monthdates"){view.screen="month"}else if(view.screen==="month"){view.screen="home"}else view.screen="home";render()}
+function day(a){
+ const rec=getRecord(view.shop,view.date);
+ const shopIndex=shops.indexOf(view.shop);
+ const previousDate=getPreviousDate(view.date);
+ const rows=items.filter(x=>x.active).map(it=>{
+   const r=rec[it.id]||{};
+   const opening = r.opening!==undefined ? r.opening : previousClosing(it.id,view.shop,view.date);
+   const received=+r.received||0,sold=+r.sold||0,purchase=+r.purchase||0,sale=+r.sale||0;
+   const closing=opening+received-sold;
+   const profit=sale-(sold*purchase);
+   return {it,r,opening,received,sold,purchase,sale,closing,profit};
+ });
+ const totals=rows.reduce((o,x)=>{o.sold+=x.sold;o.sale+=x.sale;o.profit+=x.profit;o.stock+=x.closing;return o},{sold:0,sale:0,profit:0,stock:0});
+ a.innerHTML=`<div class="breadcrumb">${view.shop} › ${view.date}</div>
+ <div class="actions"><button onclick="addItemModal()">➕ Add Item</button><button class="secondary" onclick="view.screen='transfers';render()">🔄 Transfer Stock</button><button class="secondary" onclick="view.screen='reports';render()">📊 Reports</button></div>
+ <div class="kpis"><div class="kpi">Sold<b>${totals.sold}</b></div><div class="kpi">Actual Sales<b>${money(totals.sale)}</b></div><div class="kpi">Profit<b>${money(totals.profit)}</b></div><div class="kpi">Closing Units<b>${totals.stock}</b></div></div>
+ <div class="note">Enter the <b>actual total amount collected</b> in Sale Amount. Discounts are automatically reflected in profit.</div>
+ <div class="tablewrap"><table><thead><tr><th>Item / Size</th><th>Opening</th><th>Received</th><th>Purchase / pc</th><th>Sold</th><th>Actual Sale ₹</th><th>Closing</th><th>Profit</th></tr></thead><tbody>
+ ${rows.map(x=>`<tr><td><span class="itemname">${x.it.name}</span><br><small class="muted">${x.it.size} ml</small></td>
+ <td><input type="number" min="0" value="${x.opening}" onchange="setCell('${x.it.id}','opening',this.value)"></td>
+ <td><input type="number" min="0" value="${x.received}" onchange="setCell('${x.it.id}','received',this.value)"></td>
+ <td><input type="number" min="0" step="0.01" value="${x.purchase}" onchange="setCell('${x.it.id}','purchase',this.value)"></td>
+ <td><input type="number" min="0" value="${x.sold}" onchange="setCell('${x.it.id}','sold',this.value)"></td>
+ <td><input type="number" min="0" step="0.01" value="${x.sale}" onchange="setCell('${x.it.id}','sale',this.value)"></td>
+ <td>${x.closing}</td><td>${money(x.profit)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function setCell(id,key,val){
+ const rec=getRecord(view.shop,view.date); if(!rec[id])rec[id]={}; rec[id][key]=Number(val)||0; state.records[recKey(view.shop,view.date)]=rec; save(); render();
+}
+function previousClosing(id,shop,date){
+ const [m,d]=date.split(" "); let mi=months().indexOf(m),day=+d-1;
+ if(day<1){mi--;if(mi<0)return 0;day=daysInMonth(months()[mi])}
+ const prev=months()[mi]+" "+String(day).padStart(2,"0"); const r=state.records[recKey(shop,prev)]?.[id];
+ if(!r)return 0;
+ const opening=+r.opening||0,received=+r.received||0,sold=+r.sold||0;return opening+received-sold;
+}
+function getPreviousDate(date){return date}
+function addItemModal(){
+ document.getElementById("modalTitle").textContent="Add New Item";
+ document.getElementById("modalBody").innerHTML=`<div class="formgrid">
+ <label class="full">Item name<input id="newName" placeholder="e.g. New Brand"></label>
+ <label>Size (ml)<input id="newSize" placeholder="750"></label>
+ <label>Purchase cost<input id="newPurchase" type="number" placeholder="0"></label>
+ <label>Initial opening stock<input id="newOpening" type="number" placeholder="0"></label>
+ </div>`;
+ document.getElementById("modalSave").onclick=()=>{
+  const name=document.getElementById("newName").value.trim(),size=document.getElementById("newSize").value.trim();
+  if(!name||!size)return alert("Enter item name and size.");
+  const id=crypto.randomUUID();items.push({id,name,size,active:true,defaultPurchase:+document.getElementById("newPurchase").value||0});
+  if(document.getElementById("newOpening").value) {const r=getRecord(view.shop,view.date);r[id]={opening:+document.getElementById("newOpening").value||0,purchase:+document.getElementById("newPurchase").value||0};}
+  save();closeModal();render();
+ };openModal();
+}
+function openModal(){document.getElementById("modal").classList.add("show")}
+function closeModal(){document.getElementById("modal").classList.remove("show")}
+function itemManager(a){
+ a.innerHTML=`<div class="toolbar"><button onclick="addItemModal()">➕ Add New Item</button><span class="muted">${items.length} item/size entries</span></div>
+ <div class="tablewrap"><table style="min-width:650px"><thead><tr><th>Item</th><th>Size</th><th>Status</th><th>Action</th></tr></thead><tbody>
+ ${items.map(it=>`<tr><td>${it.name}</td><td>${it.size} ml</td><td style="text-align:right"><span class="badge ${it.active?'good':'bad'}">${it.active?'Active':'Hidden'}</span></td><td><button class="secondary" onclick="toggleItem('${it.id}')">${it.active?'Hide':'Activate'}</button></td></tr>`).join("")}</tbody></table></div>`;
+}
+function toggleItem(id){const it=items.find(x=>x.id===id);it.active=!it.active;save();render()}
+function transfers(a){
+ a.innerHTML=`<div class="toolbar"><button onclick="transferModal()">🔄 New Transfer</button></div>
+ <div class="tablewrap"><table style="min-width:760px"><thead><tr><th>Date</th><th>Item</th><th>From</th><th>To</th><th>Qty</th></tr></thead><tbody>
+ ${state.transfers.length?state.transfers.slice().reverse().map(t=>`<tr><td>${t.date}</td><td>${t.item} (${t.size} ml)</td><td>${t.from}</td><td>${t.to}</td><td>${t.qty}</td></tr>`).join(""):`<tr><td colspan="5"><div class="empty">No transfers yet.</div></td></tr>`}</tbody></table></div>
+ <div class="note">Transfers change stock only. They are not counted as sales or profit.</div>`;
+}
+function transferModal(){
+ document.getElementById("modalTitle").textContent="Transfer Stock";
+ document.getElementById("modalBody").innerHTML=`<div class="formgrid">
+ <label class="full">Item<select id="trItem">${items.filter(x=>x.active).map(x=>`<option value="${x.id}">${x.name} • ${x.size} ml</option>`).join("")}</select></label>
+ <label>From<select id="trFrom">${shops.map(s=>`<option>${s}</option>`).join("")}</select></label>
+ <label>To<select id="trTo">${shops.map(s=>`<option>${s}</option>`).join("")}</select></label>
+ <label>Quantity<input id="trQty" type="number" min="1" value="1"></label>
+ <label>Date<input id="trDate" type="date" value="${new Date().toISOString().slice(0,10)}"></label>
+ </div>`;
+ document.getElementById("modalSave").onclick=()=>{
+  const from=document.getElementById("trFrom").value,to=document.getElementById("trTo").value,qty=+document.getElementById("trQty").value;
+  if(from===to)return alert("Choose two different shops.");
+  const it=items.find(x=>x.id===document.getElementById("trItem").value);
+  state.transfers.push({date:document.getElementById("trDate").value,item:it.name,size:it.size,from,to,qty});save();closeModal();render();
+ };openModal();
+}
+function reports(a){
+ const now=new Date(), y=now.getFullYear(), m=months()[now.getMonth()];
+ const data=summaryAll();
+ const shopCards=shops.map(s=>{let d=summaryShop(s);return `<div class="card"><div class="muted">${s}</div><div class="big">${money(d.sales)}</div><div>Profit: <b>${money(d.profit)}</b></div><div class="muted">${d.sold} units sold</div></div>`}).join("");
+ a.innerHTML=`<div class="toolbar"><select id="period" onchange="renderReportPeriod()"><option value="month">This Month</option><option value="week">Last 7 Days</option><option value="today">Today</option></select><button class="secondary" onclick="customReport()">📅 Custom Range</button></div>
+ <div class="kpis"><div class="kpi">All Shops Sales<b>${money(data.sales)}</b></div><div class="kpi">All Shops Profit<b>${money(data.profit)}</b></div><div class="kpi">Units Sold<b>${data.sold}</b></div><div class="kpi">Low Stock<b>${data.low}</b></div></div>
+ <h3>Shop-wise</h3><div class="grid">${shopCards}</div>
+ <div class="card" style="margin-top:14px"><h3>🔥 Sales Performance</h3><div id="performance">${performanceHTML()}</div></div>`;
+}
+function summaryShop(shop){
+ let sales=0,profit=0,sold=0,low=0;
+ Object.keys(state.records).filter(k=>k.startsWith(shop+"|")).forEach(k=>Object.values(state.records[k]).forEach(r=>{sales+=+r.sale||0;profit+=(+r.sale||0)-((+r.sold||0)*(+r.purchase||0));sold+=+r.sold||0}));
+ items.forEach(it=>{let c=previousClosing(it.id,shop,"December 31");if(c<=5&&c>0)low++});
+ return {sales,profit,sold,low};
+}
+function summaryAll(){let z={sales:0,profit:0,sold:0,low:0};shops.forEach(s=>{let d=summaryShop(s);z.sales+=d.sales;z.profit+=d.profit;z.sold+=d.sold;z.low+=d.low});return z}
+function performanceHTML(){
+ const agg={};Object.values(state.records).forEach(rec=>Object.entries(rec).forEach(([id,r])=>{if(!agg[id])agg[id]={sold:0,profit:0};agg[id].sold+=+r.sold||0;agg[id].profit+=(+r.sale||0)-((+r.sold||0)*(+r.purchase||0))}));
+ const top=Object.entries(agg).sort((a,b)=>b[1].sold-a[1].sold).slice(0,5), low=Object.entries(agg).sort((a,b)=>a[1].sold-b[1].sold).slice(0,5);
+ const find=id=>items.find(x=>x.id===id);
+ return `<div class="grid"><div><b>🔥 Fast-moving</b>${top.map(([id,x])=>`<p>${find(id)?.name||"Item"} ${find(id)?`(${find(id).size} ml)`:""} <span class="badge good">${x.sold} sold</span></p>`).join("")||"<p class='muted'>Enter sales to see rankings.</p>"}</div>
+ <div><b>🐢 Low-selling</b>${low.map(([id,x])=>`<p>${find(id)?.name||"Item"} ${find(id)?`(${find(id).size} ml)`:""} <span class="badge warn">${x.sold} sold</span></p>`).join("")||"<p class='muted'>Enter sales to see rankings.</p>"}</div></div>`;
+}
+function renderReportPeriod(){reports(document.getElementById("app"))}
+function customReport(){alert("Custom date-range reporting is planned for the next prototype step. The current prototype already supports daily, monthly and transfer records.")}
+render();
+</script>
+
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+}
+</script>
+
+</body>
+</html>
