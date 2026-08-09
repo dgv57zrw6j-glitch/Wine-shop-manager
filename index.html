@@ -36,7 +36,7 @@ td input{width:85px;padding:7px;border:1px solid #d6dae0;border-radius:7px}td .i
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Wine Shop Manager">
-to
+
 </head>
 <body>
 <header>
@@ -119,8 +119,7 @@ function render(){
  if(view.screen==="home") return home(app);
  if(view.screen==="shop") return shop(app);
  if(view.screen==="month") return month(app);
-if(view.screen==="monthdates") return monthdates(app);
-if(view.screen==="day") return day(app);
+ if(view.screen==="day") return day(app);
  if(view.screen==="reports") return reports(app);
  if(view.screen==="items") return itemManager(app);
  if(view.screen==="transfers") return transfers(app);
@@ -295,15 +294,128 @@ function transferModal(){
   save();closeModal();render();
  };openModal();
 }
-function reports(a){
- const now=new Date(), y=now.getFullYear(), m=months()[now.getMonth()];
- const data=summaryAll();
- const shopCards=shops.map(s=>{let d=summaryShop(s);return `<div class="card"><div class="muted">${s}</div><div class="big">${money(d.sales)}</div><div>Profit: <b>${money(d.profit)}</b></div><div class="muted">${d.sold} units sold</div></div>`}).join("");
- a.innerHTML=`<div class="toolbar"><select id="period" onchange="renderReportPeriod()"><option value="month">This Month</option><option value="week">Last 7 Days</option><option value="today">Today</option></select><button class="secondary" onclick="customReport()">📅 Custom Range</button></div>
- <div class="kpis"><div class="kpi">All Shops Sales<b>${money(data.sales)}</b></div><div class="kpi">All Shops Profit<b>${money(data.profit)}</b></div><div class="kpi">Units Sold<b>${data.sold}</b></div><div class="kpi">Low Stock<b>${data.low}</b></div></div>
- <h3>Shop-wise</h3><div class="grid">${shopCards}</div>
- <div class="card" style="margin-top:14px"><h3>🔥 Sales Performance</h3><div id="performance">${performanceHTML()}</div></div>`;
+function reportDates(period){
+ const now=new Date();
+ const out=[];
+ const add=(dt)=>{
+   const m=months()[dt.getMonth()];
+   const d=String(dt.getDate()).padStart(2,"0");
+   out.push({key:m+" "+d,date:dt});
+ };
+ if(period==="today"){
+   add(now);
+ }else if(period==="week"){
+   for(let i=6;i>=0;i--){let dt=new Date(now);dt.setDate(now.getDate()-i);add(dt);}
+ }else{
+   const y=now.getFullYear(),m=now.getMonth();
+   for(let d=1;d<=new Date(y,m+1,0).getDate();d++) add(new Date(y,m,d));
+ }
+ return out;
 }
+
+function reportData(period, shopFilter="ALL"){
+ const dates=new Set(reportDates(period).map(x=>x.key));
+ const byItem={};
+ let sales=0,profit=0,sold=0,low=0;
+ const shopsToUse=shopFilter==="ALL"?shops:[shopFilter];
+
+ Object.entries(state.records).forEach(([key,rec])=>{
+   const parts=key.split("|"); if(parts.length!==2)return;
+   const shop=parts[0],dateKey=parts[1];
+   if(!shopsToUse.includes(shop)||!dates.has(dateKey))return;
+
+   Object.entries(rec).forEach(([id,r])=>{
+     const q=+r.sold||0, sale=+r.sale||0, purchase=+r.purchase||0;
+     const p=sale-(q*purchase);
+     sales+=sale; profit+=p; sold+=q;
+     if(!byItem[id])byItem[id]={sold:0,sales:0,profit:0};
+     byItem[id].sold+=q;byItem[id].sales+=sale;byItem[id].profit+=p;
+   });
+ });
+
+ // Current stock estimate: use latest available record per item/shop plus transfers.
+ items.filter(x=>x.active).forEach(it=>{
+   shopsToUse.forEach(shop=>{
+     const keys=Object.keys(state.records).filter(k=>k.startsWith(shop+"|"));
+     let latest=null,latestDate=-1;
+     keys.forEach(k=>{
+       const dateKey=k.split("|")[1];
+       const [mn,ds]=dateKey.split(" ");
+       const idx=months().indexOf(mn)*32+(+ds);
+       if(idx>latestDate && state.records[k][it.id]){
+         latestDate=idx;latest={key:k,r:state.records[k][it.id]};
+       }
+     });
+     if(latest){
+       const r=latest.r;
+       const closing=(+r.opening||0)+(+r.received||0)-(+r.sold||0)-(+r.transferOut||0);
+       if(closing>0 && closing<=5) low++;
+     }
+   });
+ });
+ return {sales,profit,sold,low,byItem};
+}
+
+function reports(a){
+ const period=window.reportPeriod||"week";
+ const all=reportData(period);
+ const rankings=Object.entries(all.byItem).map(([id,x])=>{
+   const it=items.find(i=>i.id===id);return {...x,it};
+ }).filter(x=>x.it).sort((a,b)=>b.sold-a.sold);
+ const profitRank=[...rankings].sort((a,b)=>b.profit-a.profit);
+ const shopCards=shops.map(s=>{
+   const d=reportData(period,s);
+   return `<div class="card"><div class="muted">${s}</div>
+   <div class="big">${money(d.sales)}</div>
+   <div>Profit: <b>${money(d.profit)}</b></div>
+   <div class="muted">${d.sold} units sold</div></div>`;
+ }).join("");
+
+ a.innerHTML=`<div class="toolbar">
+   <select id="period" onchange="window.reportPeriod=this.value;reports(document.getElementById('app'))">
+     <option value="week" ${period==="week"?"selected":""}>This Week</option>
+     <option value="month" ${period==="month"?"selected":""}>This Month</option>
+     <option value="today" ${period==="today"?"selected":""}>Today</option>
+   </select>
+ </div>
+
+ <div class="kpis">
+   <div class="kpi">Total Sales<b>${money(all.sales)}</b></div>
+   <div class="kpi">Total Profit<b>${money(all.profit)}</b></div>
+   <div class="kpi">Items Sold<b>${all.sold}</b></div>
+   <div class="kpi">Low Stock<b>${all.low}</b></div>
+ </div>
+
+ <h3>🏪 Shop Performance</h3>
+ <div class="grid">${shopCards}</div>
+
+ <div class="card" style="margin-top:14px">
+   <h3>🔥 Fast-Moving Items</h3>
+   ${rankings.slice(0,8).map((x,i)=>`
+     <p><b>${i+1}. ${x.it.name}</b> <span class="muted">${x.it.size} ml</span>
+     <span class="badge good">${x.sold} sold</span></p>`).join("") ||
+     `<p class="muted">No sales recorded for this period yet.</p>`}
+ </div>
+
+ <div class="card" style="margin-top:14px">
+   <h3>🐢 Low-Selling Items</h3>
+   ${rankings.slice(-8).reverse().map(x=>`
+     <p><b>${x.it.name}</b> <span class="muted">${x.it.size} ml</span>
+     <span class="badge warn">${x.sold} sold</span></p>`).join("") ||
+     `<p class="muted">No sales recorded for this period yet.</p>`}
+ </div>
+
+ <div class="card" style="margin-top:14px">
+   <h3>💰 Highest-Profit Items</h3>
+   ${profitRank.slice(0,8).map(x=>`
+     <p><b>${x.it.name}</b> <span class="muted">${x.it.size} ml</span>
+     <span class="badge good">${money(x.profit)}</span></p>`).join("") ||
+     `<p class="muted">No profit data for this period yet.</p>`}
+ </div>
+
+ <div class="note">Reports are calculated from the daily records you've entered. Transfers are stock movements and are not counted as sales or profit.</div>`;
+}
+
 function summaryShop(shop){
  let sales=0,profit=0,sold=0,low=0;
  Object.keys(state.records).filter(k=>k.startsWith(shop+"|")).forEach(k=>Object.values(state.records[k]).forEach(r=>{sales+=+r.sale||0;profit+=(+r.sale||0)-((+r.sold||0)*(+r.purchase||0));sold+=+r.sold||0}));
