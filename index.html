@@ -1,6 +1,12 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://yxtjakefmjjpexelsvyb.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_NHvPou6FA907BlxYS_c27A_AnuKwikP";
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Wine Shop Stock Manager</title>
@@ -114,13 +120,74 @@ function renderHeader(){
  let title=view.screen==="home"?"Wine Shop Stock Manager":view.shop||"";
  document.getElementById("headerContent").innerHTML=(view.screen!=="home"?`<button class="back" onclick="goBack()">‹ Back</button>`:"")+`<h1>${title}</h1><div class="sub">Inventory • Sales • Transfers • Profit</div>`;
 }
+
+let cloudUser=null;
+let cloudProfile=null;
+
+async function loadCloudProfile(){
+  if(!cloudUser){cloudProfile=null;return;}
+  const {data,error}=await supabaseClient.from("profiles").select("id,full_name,role").eq("id",cloudUser.id).single();
+  if(!error) cloudProfile=data;
+}
+
+async function cloudLogin(){
+  const email=document.getElementById("cloudEmail").value.trim();
+  const password=document.getElementById("cloudPassword").value;
+  const msg=document.getElementById("cloudMsg");
+  msg.textContent="Signing in…";
+  const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});
+  if(error){msg.textContent=error.message;return;}
+  cloudUser=data.user;
+  await loadCloudProfile();
+  render();
+}
+
+async function cloudSignup(){
+  const email=document.getElementById("cloudEmail").value.trim();
+  const password=document.getElementById("cloudPassword").value;
+  const msg=document.getElementById("cloudMsg");
+  if(password.length<6){msg.textContent="Password must be at least 6 characters.";return;}
+  msg.textContent="Creating account…";
+  const {data,error}=await supabaseClient.auth.signUp({email,password});
+  if(error){msg.textContent=error.message;return;}
+  if(data.session){
+    cloudUser=data.user;
+    await loadCloudProfile();
+    render();
+  }else{
+    msg.textContent="Account created. Check your email to confirm it, then log in.";
+  }
+}
+
+async function cloudLogout(){
+  await supabaseClient.auth.signOut();
+  cloudUser=null; cloudProfile=null; render();
+}
+
+function loginScreen(app){
+  app.innerHTML=`<div class="card" style="max-width:420px;margin:50px auto">
+    <h1>🍾 Wine Shop Manager</h1>
+    <p class="muted">Cloud backup & multi-user login</p>
+    <label>Email</label>
+    <input id="cloudEmail" type="email" placeholder="your@email.com" autocomplete="email">
+    <label>Password</label>
+    <input id="cloudPassword" type="password" placeholder="Password" autocomplete="current-password">
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button onclick="cloudLogin()">Log in</button>
+      <button onclick="cloudSignup()">Create account</button>
+    </div>
+    <p id="cloudMsg" class="muted" style="margin-top:12px"></p>
+  </div>`;
+}
+
 function render(){
+  const app=document.getElementById("app");
+  if(!cloudUser){ return loginScreen(app); }
  renderHeader(); const app=document.getElementById("app");
  if(view.screen==="home") return home(app);
  if(view.screen==="shop") return shop(app);
  if(view.screen==="month") return month(app);
-if(view.screen==="monthdates") return monthdates(app);
-if(view.screen==="day") return day(app);
+ if(view.screen==="day") return day(app);
  if(view.screen==="reports") return reports(app);
  if(view.screen==="items") return itemManager(app);
  if(view.screen==="transfers") return transfers(app);
