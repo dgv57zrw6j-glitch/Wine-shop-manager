@@ -1,4 +1,4 @@
-const CACHE = "wine-shop-v6";
+const CACHE = "wine-shop-v7";
 
 const ASSETS = [
   "./index.html",
