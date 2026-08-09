@@ -1,4 +1,5 @@
-const CACHE = "wine-shop-v4";
+const CACHE = "wine-shop-v5";
+
 const ASSETS = [
   "./index.html",
   "./manifest.webmanifest"
@@ -28,8 +29,8 @@ self.addEventListener("fetch", event => {
   if (event.request.method !== "GET") return;
 
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      return cached || fetch(event.request);
+    caches.match(event.request).then(cachedResponse => {
+      return cachedResponse || fetch(event.request);
     })
   );
 });
